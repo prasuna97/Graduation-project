@@ -1,0 +1,454 @@
+%%% to read input image %%%
+
+clc;
+warning off;
+[filename, pathname]=uigetfile('*.*','select an image');
+i=imread(filename);
+i=imresize(i,[255 255]);
+figure,imshow(i),title('origional image');
+
+ %%%%%%%%%%% image Preprocessing %%%%%%%%
+ 
+ %%% image enhancement using image scale fitting %%%
+ 
+a = im2double(i);
+%ha=imadjust(a);
+figure,imshow(a);
+%get hairs using bottomhat filter
+ P=rgb2gray(a);
+ se = strel('disk',20);
+ hairs = imbothat(P,se);
+ figure, imshow(hairs),title('filtered image');
+[m,n,k] = size(a);%m-rows;n-columns;k-dummy(1-binary and 3-color image
+ar = a(:,:,1);
+%figure,imshow(ar);
+ag = a(:,:,2);
+%figure,imshow(ag);
+ab = a(:,:,3);
+%figure,imshow(ab);
+br = 1.5*ar;
+bg = 1.5*ag;
+bb = 1.5*ab;
+c = zeros(m,n,k);
+c(:,:,1) = br;
+c(:,:,2) = bg;
+c(:,:,3) = bb;
+figure,imshow(c),title('enhanced image'); 
+input=c;
+
+
+%%%%%%%%%%%%%%%%% Image segmentation %%%%%%%%%%%%%%%%%%
+
+
+
+I = rgb2gray(input);
+hy = fspecial('sobel');
+hx = hy';
+Iy = imfilter(double(I), hy, 'replicate');
+Ix = imfilter(double(I), hx, 'replicate');
+gradmag = sqrt(Ix.^2 + Iy.^2);
+L = watershed(gradmag);
+Lrgb = label2rgb(L);
+se = strel('disk', 20);
+Io = imopen(I, se);
+Ie = imerode(I, se);
+Iobr = imreconstruct(Ie, I);
+Ioc = imclose(Io, se);
+Iobrd = imdilate(Iobr, se);
+Iobrcbr = imreconstruct(imcomplement(Iobrd), imcomplement(Iobr));
+Iobrcbr = imcomplement(Iobrcbr);
+fgm = imregionalmax(Iobrcbr);
+I2 = I;
+I2(fgm) = 255;
+se2 = strel(ones(5,5));
+fgm2 = imclose(fgm, se2);
+fgm3 = imerode(fgm2, se2);
+fgm4 = bwareaopen(fgm3, 20);
+I3 = I;
+I3(fgm4) = 255;
+bw = im2bw(Iobrcbr, graythresh(Iobrcbr));
+figure,imshow(imcomplement(bw)),title('segmented image ');
+
+
+
+
+ %%%%%%%%%%%%%% Extraction of ABCD features %%%%%%%%%%%
+
+
+  %%%%%% (A) - Asymmetry Index %%%%%%%
+
+
+a=imcomplement(bw);
+%figure,imshow(a);
+plp=regionprops(a,'perimeter');
+pl=regionprops(a,'centroid');
+pp=plp.Perimeter;
+p=pl.Centroid(:,1);
+disp(p);%x coordinate of centroid
+pc=pl.Centroid(:,2);%y coordinate of centroid
+p=round(p);
+disp(p);
+pc=round(pc);
+a1=a(:,1:p);
+a2=a(:,p+1:end);
+[m, n]=size(a);
+r=m-p;
+if(p<=r)
+    p1= r-p;
+    b1=a1;
+    %disp(b1);
+    b4=p+p1;
+    b1(:,p+1:b4)=0;
+    b1 = circshift(b1,[0 p1]);
+    %disp(b1);
+    a1=b1;
+else
+   p2= p-r;
+   b2=a2;
+   b3=r+p2;
+   b2(:,r:b3)=0;
+   a2=b2;
+end
+a3=fliplr(a2);
+a4=xor(a1,a3);
+a5=bwarea(a4);
+a6=bwarea(a);
+disp(a6);
+AI1=(a5)/a6;
+a7=a(1:pc,:);
+a8=a(pc+1:end,:);
+r1=n-pc;
+if(pc<=r1)
+  p3=r1-pc;
+  b5=pc+p3;
+  b6=a7;
+  b6(pc+1:b5,:)=0;
+  a7=b6;
+  a7 = circshift(a7,[p3 0]);
+else
+  p4=pc-r1;
+  b7=r1+p4;
+  b8=a8;
+ b8(r1:b7,:)=0;
+ a8=b8;
+end
+a9=flipud(a8);
+a10=xor(a7,a9);
+a11=bwarea(a10);
+AI2=(a11)/a6;
+
+A=(AI1+AI2)/2;
+disp(A);
+
+
+%%%%%%% (B) - Border Irregularity %%%%%%%
+
+ 
+
+     %%% to find Compact Indexe %%%
+ 
+ CI=(pp*pp)/(4*pi*a6);
+
+
+
+
+ %%% to find Fractal Dimension %%%
+ 
+
+
+% detect the edge of image 'p' using the Canny algorithm
+% this gives edge as 'e2'
+e2 = edge(bw,'canny');
+figure,imshow(e2),title('edge detected image');
+
+% once we have e2, set up a grid of blocks across the image
+% and scan each bloch too see if the edge occupies any of the blocks.
+% If a block is occupied then flag it and record it in boxCount --
+% store both size of blocks (numBlocks) and no of occupied boxes (boxCount)
+% in table()
+Nx = size(e2,1);
+Ny = size(e2,2);
+for numBlocks = 1:25
+    sizeBlocks_x = floor(Nx./numBlocks);
+    sizeBlocks_y = floor(Ny./numBlocks);
+    flag = zeros(numBlocks,numBlocks);
+    for i = 1:numBlocks
+        for j = 1:numBlocks
+            xStart = (i-1)*sizeBlocks_x + 1;
+            xEnd = i*sizeBlocks_x;
+            yStart = (j-1)*sizeBlocks_y + 1;
+            yEnd = j*sizeBlocks_y;
+            block = e2(xStart:xEnd, yStart:yEnd);
+            flag(i,j) = any(block(:)); %mark this if ANY part of block is true
+        end
+    end
+    boxCount = nnz(flag);
+    table(numBlocks,1) = numBlocks;
+    table(numBlocks,2) = boxCount;
+end
+% from the above table of discrete points, take a line of best fit and plot
+% the raw data (ro) and line of best fit (r-)
+x = table(:,1); % x is numBlocks
+y = table(:,2); % y is boxCount
+p = polyfit(x,y,1);
+BestFit = polyval(p,x);
+
+x2 = log(x);
+y2 = log(y);
+p2 = polyfit(x2,y2,1);
+BestFit2 = polyval(p2,x2);
+
+fractal = p2(:,1);
+
+%%% to calculate Edge variation %%%
+
+
+[x , map]=rgb2ind(input,128);
+hsv=rgb2hsv(map);
+L=hsv(:,3);
+[Gmag, Gdir] = imgradient(L,'prewitt');
+l=mean2(Gmag);
+lg=var(Gmag); 
+
+
+B =( CI+fractal+l+lg );
+disp(B)
+
+%%%%%%%%%%%% (C) - Color Index calculation &&&&&&&&
+
+
+
+I = im2double(input);
+[index,map] = rgb2ind(I,1024);
+pixels = prod(size(index));
+hsv = rgb2hsv(map);
+h = hsv(:,1);
+s = hsv(:,2);
+v = hsv(:,3);
+%Finds location of black and white pixels
+darks = find(v < .2)';
+lights = find(s < .05 & v > .85)';
+h([darks lights]) = -1;
+%Gets the number of all pixels for each color bin
+black = length(darks)/pixels;
+white = length(lights)/pixels;
+red = length(find((h > .9167 | h <= .083) & h ~= -1))/pixels;
+yellow = length(find(h > .083 & h <= .25))/pixels;
+green = length(find(h > .25 & h <= .4167))/pixels;
+cyan = length(find(h > .4167 & h <= .5833))/pixels;
+blue = length(find(h > .5833 & h <= .75))/pixels;
+magenta = length(find(h > .75 & h <= .9167))/pixels;
+dark_brown = length(find((h >0.9694 | h <= 0.1361) & h ~= -1))/pixels;
+light_brown = length(find((h >0.9722 | h <= 0.1388) & h ~= -1))/pixels;
+
+
+if(black~=0)
+    
+   b=1;
+else
+    
+   b=0;
+end
+
+if(white~=0)
+    
+  w=1;
+  
+else
+    
+  w=0;
+  
+end
+
+if(red~=0)
+    
+  r=1;
+  
+else
+    
+  r=0;
+  
+end
+
+if(blue~=0)
+    
+  bl=1;
+  
+else
+    
+  bl=0;
+  
+end
+
+if(dark_brown~=0)
+    
+  d=1;
+  
+else
+    
+  d=0;
+  
+end
+
+if(light_brown~=0)
+    
+  li=1;
+  
+else
+    
+  li=0;
+  
+end
+
+
+   C = (w+b+r+bl+d+li);
+   disp(C);
+ 
+
+   %%%%%%%% (D) - Diameter  calculation %%%%%%%%%%
+   
+  
+m=imcomplement(bw);
+ma=regionprops(m,'majoraxislength');
+mi=regionprops(m,'MinorAxisLength');
+max=ma.MajorAxisLength;
+min=mi.MinorAxisLength;
+if(max>=min)
+   DIA=min;
+   
+   if(DIA>=22.6772)
+       
+      dia=5;
+   else
+       
+      dia=DIA;
+      
+   end
+end 
+
+  D = dia ;
+  disp(D);
+   
+ 
+ %%%%%%%%%%% Total Dermotalogy Score (TDS) calculation
+
+
+TDS= (1.3 * A) + (0.1 * B ) + ( 0.5 * C ) + ( 0.5 * D );
+disp(TDS);
+
+
+     %%%%%%%%%%%% classification %%%%%%%%%
+
+
+if TDS <4.75
+    
+    disp('non can cerous skin lesion');
+    
+elseif (TDS>=4.7 && TDS < 5.45)
+    
+    disp('suspicious case of  skin lesion');
+    
+elseif (TDS >= 5.45)
+    
+    disp('cancerous skin lesion' );
+    
+end
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% ARTIFICIAL NEURAL NETWORKS CODE TO TRAIN%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+___________________________________________________________________________________________________________________________
+
+clc;
+clear all;
+close all;
+[filename,pathname]=uigetfile('*.*','pick an image');
+a=imread(filename);
+figure,imshow(a);
+ 
+%%%% PREPROCESSING %%%%
+ b=imresize(a,[256 256]);
+ figure,imshow(b);
+ c=rgb2gray(b);
+ figure,imshow(c);
+ d=im2bw(c);
+ figure,imshow(d);
+ 
+ %%%%
+
+  se=strel('disk',1);
+  background=imopen(d,se);
+  i2=d-background;
+  figure,imshow(i2);
+  m=edge(i2,'sobel');
+  figure,imshow(m);
+  
+  mask=d;
+  src=c;
+   masked = bsxfun(@times, src, cast(mask,class(src)));
+   k=im2bw(masked);
+   k=~k;
+   figure,imshow(k);
+   
+   %%%%
+   L = bwlabel(k);
+stats = regionprops(L,'all');
+m=stats(1).Area;
+ n=stats(1).Perimeter;
+ o=stats(1).MajorAxisLength;
+ p=stats(1).MinorAxisLength;
+ 
+Circularityindex= n  .^ 2 ./ (4 * pi* m);
+ 
+  A=n/m;
+  B=n/ o;
+  C=n*((1/p)-(1/o));
+  D=o-p;
+  
+pr=size(4,1);
+i=1;
+pr(i,1)=A;
+i=i+1;
+pr(i,1)=B;
+i=i+1;
+pr(i,1)=C;
+i=i+1;
+pr(i,1)=D;
+
+save('pr');
+load('feat1.mat');
+load('labels.mat');
+
+load('pr.mat');
+
+net=newff(feat1,labels,80);
+net.trainParam.epochs=10;
+[net1,p]=train(net,feat1,labels);
+
+mm1=sim(net1,pr);
+mm=round(mm1);
+T=[0];
+T1=[1];
+if(mm==0)
+    disp('cancer image');
+    helpdlg('cancer image');
+else
+    disp('non cancer image');
+    helpdlg('non cancer image');
+end
+
+
+
+temp_obj_eval = objective_evaluation_core(k, im2bw(b));
+
+
+disp('Accuracy--');
+Sen=temp_obj_eval.Accuracy;
+disp(temp_obj_eval.Accuracy);
+
+
+
+
+
+
+
+
